@@ -77,12 +77,17 @@ defmodule Jido.Composer.Node.FanOutNode do
   def run(%__MODULE__{} = node, context, _opts \\ []) do
     concurrency = node.max_concurrency || length(node.branches)
 
+    # Capture OTel context so child tasks produce spans under the same trace.
+    parent_ctx = Jido.Composer.OtelCtx.get_current()
+
     results =
       node.branches
       |> Task.async_stream(
         fn {branch_name, branch_node} ->
-          result = branch_node.__struct__.run(branch_node, context)
-          {branch_name, result}
+          Jido.Composer.OtelCtx.with_parent_context(parent_ctx, fn ->
+            result = branch_node.__struct__.run(branch_node, context)
+            {branch_name, result}
+          end)
         end,
         timeout: node.timeout,
         on_timeout: :kill_task,
