@@ -826,7 +826,8 @@ defmodule Jido.Composer.Orchestrator.Strategy do
         &Obs.start_llm_span(&1, %{
           model: state.model,
           iteration: state.iteration + 1,
-          input_messages: input_messages
+          input_messages: input_messages,
+          tools: state.tools
         })
       )
 
