@@ -250,7 +250,26 @@ defmodule Jido.Composer.Orchestrator.DSL do
   defp unwrap_result(result), do: result
 
   defp execute_orch_instruction(%Jido.Instruction{action: action_module, params: params}) do
-    case Jido.Exec.run(action_module, params, %{}, timeout: 0) do
+    # Forward Composer ambient state (e.g. actor/tenant/domain put there by
+    # the orchestrator's `:ambient` keys) as the action's `context` arg so
+    # libraries that expect cross-cutting state via `Jido.Exec.run`'s third
+    # arg (e.g. AshJido, which reads :domain/:tenant/:actor from context)
+    # see what callers passed to `query_sync/3`. Without this, ambient data
+    # only reaches actions through `params[Context.ambient_key()]`, which
+    # AshJido has no notion of.
+    #
+    # Strip the ambient tuple key from params after extracting it: now that
+    # ambient is forwarded as context, the in-params copy is redundant and
+    # actively hazardous for actions that introspect their params keys.
+    # AshJido's `Ash.ActionInput.cast_params` is the headline case — it
+    # calls `has_argument?/2` on every key and crashes with a
+    # FunctionClauseError on the `{Jido.Composer.Context, :ambient}` tuple
+    # because the clause only matches atoms and binaries.
+    ambient_key = Jido.Composer.Context.ambient_key()
+    ambient = Map.get(params, ambient_key, %{})
+    action_params = Map.delete(params, ambient_key)
+
+    case Jido.Exec.run(action_module, action_params, ambient, timeout: 0) do
       {:ok, result} -> %{status: :ok, result: result}
       {:ok, result, outcome} -> %{status: :ok, result: result, outcome: outcome}
       {:error, reason} -> %{status: :error, result: %{error: reason}}
